@@ -499,13 +499,6 @@ BEGIN {
 		}
     }
 
-    corsa_capi_present = snarf("ls /dev/cxl/afu0.0s 2> /dev/null | wc -l");
-    if (corsa_capi_present) {
-                if((CMVC_RELEASE == "htxrhel72le") || (CMVC_RELEASE == "htxrhel7") || (CMVC_RELEASE == "htxubuntu")) {
-                        mkstanza("hxecorsa", "chip", "Misc", "afu0.0s", "hxecorsa", "default.capi", "" );
-                }
-    }
-
 
     ibm_internal = snarf("ls -l ${HTX_HOME_DIR}/.internal 2> /dev/null | wc -l");
     if (ibm_internal) {

@@ -1,4 +1,22 @@
-static char sccsid[] = "@(#)63	1.11  src/htx/usr/lpp/htx/bin/hxecorsa/corsa.c, exer_corsa, htxubuntu 4/1/16 06:32:12";
+/* IBM_PROLOG_BEGIN_TAG */
+/* 
+ * Copyright 2003,2016 IBM International Business Machines Corp.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * 		 http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/* IBM_PROLOG_END_TAG */
+static char sccsid[] = "@(#)63	1.8  src/htx/usr/lpp/htx/bin/hxecorsa/corsa.c, exer_corsa, htxrhel7 10/26/14 12:19:16";
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,7 +24,7 @@ static char sccsid[] = "@(#)63	1.11  src/htx/usr/lpp/htx/bin/hxecorsa/corsa.c, e
 #include <strings.h>
 #include <sys/shm.h>
 #include <sys/types.h>
-#include "hxihtx64.h"
+#include <hxihtx64.h>
 
 #ifdef __HTX_LINUX__
 #include "genwqe_card.h"
@@ -726,7 +744,7 @@ int corsa_cmprss_decmprss_compare(int ti)
 		patt_size = stanza_ptr->pattern_size[pi];
 
 		if (priv.exit_flag == 1) {
-			displaym(HTX_HE_INFO,DBG_MUST_PRINT," cmprss_decmprss_compare(%d): recieved sigterm \n",ti);
+			displaym(HTX_HE_INFO,DBG_MUST_PRINT," cmprss_decmprss_compare(%d): received sigterm \n",ti);
 			pthread_exit(0);
 		}
 
@@ -863,7 +881,7 @@ int corsa_bypass_compare(ti)
 		patt_size = stanza_ptr->pattern_size[pi];
 
 		if (priv.exit_flag == 1) {
-			displaym(HTX_HE_INFO,DBG_MUST_PRINT," corsa_bypass_compare(%d): recieved sigterm \n",ti);
+			displaym(HTX_HE_INFO,DBG_MUST_PRINT," corsa_bypass_compare(%d): received sigterm \n",ti);
 			pthread_exit(0);
 		}
 
@@ -993,7 +1011,7 @@ int corsa_compress_only(ti)
 		patt_size = stanza_ptr->pattern_size[pi];
 
 		if (priv.exit_flag == 1) {
-			displaym(HTX_HE_INFO,DBG_MUST_PRINT," corsa_compress_only(%d): recieved sigterm \n",ti);
+			displaym(HTX_HE_INFO,DBG_MUST_PRINT," corsa_compress_only(%d): received sigterm \n",ti);
 			pthread_exit(0);
 		}
 
@@ -1192,7 +1210,7 @@ int bind_to_proc(int bind_proc)
 		displaym(HTX_HE_HARD_ERROR,DBG_MUST_PRINT,"Warning! error binding "
 				 "to processor %d.", bind_proc);
 	} else {
-		displaym(HTX_HE_INFO,DBG_INFO_PRINT,"Succesfully binded thread "
+		displaym(HTX_HE_INFO,DBG_INFO_PRINT,"Successfully binded thread "
 				"(tid =%d) to the logical proc %d\n", ti, bind_proc);
 	}
 
@@ -1838,6 +1856,23 @@ th_context * corsa_get_buffer(int no_buf, int buf_size, int alignment)
 		temp_buf->alloc_size = max_buf_size;
 		temp_buf->alignment = alignment;
 
+#if 0
+		temp_buf->shm_id  = shmget(IPC_PRIVATE, max_buf_size, IPC_CREAT | IPC_EXCL | S_IRWXU| S_IRWXG | S_IRWXO );
+		if ( temp_buf->shm_id == -1 ) {
+			sprintf(info_msg,"%s[%d]:shmget failed with errno=%d(%s) for buffer[%d]\nbuf_size=%d, alloc_size=%d.\n",
+					__FUNCTION__, __LINE__, errno, strerror(errno), i, buf_size,max_buf_size);
+			hxfmsg(&stats, 1, HTX_HE_SOFT_ERROR, info_msg);
+			return(NULL);
+		}
+
+
+		local_ptr = shmat(temp_buf->shm_id, 0, 0);
+		if ( local_ptr == NULL ) {
+			sprintf(info_msg,"%s[%d]:shmat failed for buf#%d with error %d(%s). buf_size=%d, alloc_size=%d.\n",__FUNCTION__,__LINE__,i,errno,strerror(errno),buf_size,max_buf_size);
+			hxfmsg(&stats, 1, HTX_HE_SOFT_ERROR, info_msg);
+			return(NULL);
+		}
+#else
 		local_ptr = malloc(max_buf_size);
 		rc = mlock(local_ptr, max_buf_size);
 		if ( rc ) {
@@ -1845,6 +1880,7 @@ th_context * corsa_get_buffer(int no_buf, int buf_size, int alignment)
 			hxfmsg(&stats, 1, HTX_HE_HARD_ERROR, info_msg);
 			return (-1);
 		}
+#endif
 
 		MALLOC_PRINT("Memory allocated for buffer[%d]. buff addr = %llx, size = %d\n", i, local_ptr, max_buf_size);
 		temp_buf->ea_org = local_ptr;
@@ -1860,37 +1896,34 @@ th_context * corsa_get_buffer(int no_buf, int buf_size, int alignment)
 	}
 
 
-	/* Same exerciser is used for both PCIe Gzip corsa(A5)  and CAPI Gzip corsa(A7).
-	 * CAPI corsa only supports compression/decompression and hence FD is not required as
-	 * there are no IOCTLs to eb performed. 
-	 * So, if the device name has cxl (CAPI corsa) then dont open() the device. 
+	/* Open Corsa device (as I/O) and save fd, to be used in ioctl() for execution.
+	 * Also handle EEH.
 	 */
+	temp_retries = eeh_retries;
+	while ( temp_retries > 0 ) {
+#ifndef __HTX_LINUX__
+		node->corsa_fd = open(stats.sdev_id, O_RDONLY, S_IRUSR /*ignored by corsa*/);
+#else
+		node->corsa_fd = open(stats.sdev_id, O_RDWR);
+#endif
+		if ( node->corsa_fd != -1 )
+			break;
 
-	if ( strncmp(&(stats.sdev_id[5]), "genwqe", 6) == 0 ) { /* PCIe Corsa */
-
-		/* Open Corsa device (as I/O) and save fd, to be used in ioctl() for execution.
-		 * Also handle EEH.
-		 */
-		temp_retries = eeh_retries;
-		while ( temp_retries > 0 ) {
-		#ifndef __HTX_LINUX__
-			node->corsa_fd = open(stats.sdev_id, O_RDONLY, S_IRUSR /*ignored by corsa*/);
-		#else
-			node->corsa_fd = open(stats.sdev_id, O_RDWR);
-		#endif
-			if ( node->corsa_fd != -1 )
-				break;
-
-			temp_retries--;
-			sleep(EEH_SLEEP);
-		}
-		if ( node->corsa_fd == -1 ) {
-			sprintf(info_msg,"%s[%d]:open() failed for %s with %d(%s).\nCan not run on hardware. Testing can be done using standard zlib in software.",
+		temp_retries--;
+		sleep(EEH_SLEEP);
+	}
+	if ( node->corsa_fd == -1 ) {
+		sprintf(info_msg,"%s[%d]:open() failed for %s with %d(%s).\nCan not run on hardware. Testing can be done using standard zlib in software.",
 			__FUNCTION__, __LINE__, stats.sdev_id, errno, strerror(errno));
-			hxfmsg(&stats, 1, HTX_HE_SOFT_ERROR, info_msg);
-		}
+		hxfmsg(&stats, 1, HTX_HE_SOFT_ERROR, info_msg);
 	}
 
+#if 0
+	int oflags;
+	fcntl(node->corsa_fd, F_SETOWN, getpid());
+	oflags = fcntl(node->corsa_fd, F_GETFL);
+	fcntl(node->corsa_fd, oflags | FASYNC);
+#endif
 
 	return(node);
 }
@@ -2302,22 +2335,20 @@ int corsa_release_buffer(th_context *th)
 #endif
 	}
 
-	if ( strncmp(&(stats.sdev_id[5]), "genwqe", 6) == 0 ) { /* PCIe Corsa */
-		temp_retries = eeh_retries;
-		while ( temp_retries > 0 ) {
-			rc = close (th->corsa_fd);
-			if ( rc == 0 )
-				break;
-	
-			temp_retries--;
-			sleep(EEH_SLEEP);
-		}
+	temp_retries = eeh_retries;
+	while ( temp_retries > 0 ) {
+		rc = close (th->corsa_fd);
+		if ( rc == 0 )
+			break;
 
-		if ( rc ) {
-			sprintf(info_msg, "close() of corsa adapter failed with errno=%d(%s).\n", errno, strerror(errno));
-			hxfmsg(&stats, 1, HTX_HE_SOFT_ERROR, info_msg);
-			return(-1);
-		}
+		temp_retries--;
+		sleep(EEH_SLEEP);
+	}
+
+	if ( rc ) {
+		sprintf(info_msg, "close() of corsa adapter failed with errno=%d(%s).\n", errno, strerror(errno));
+		hxfmsg(&stats, 1, HTX_HE_SOFT_ERROR, info_msg);
+		return(-1);
 	}
 
 	MALLOC_PRINT("Freeing node. addr=%llx\n", th);
